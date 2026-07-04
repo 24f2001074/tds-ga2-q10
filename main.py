@@ -1,61 +1,55 @@
 import time
 import uuid
 
-from fastapi import FastAPI, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 
 EMAIL = "24f2001074@ds.study.iitm.ac.in"
 
-ALLOWED_ORIGIN = "https://app-62eqyn.example.com"
-
-app = FastAPI()
+ASSIGNED_ORIGIN = "https://app-62eqyn.example.com"
+EXAM_ORIGIN = "https://exam.sanand.workers.dev"
 
 WINDOW = 10
 LIMIT = 13
+
+app = FastAPI()
+
+# Let FastAPI handle CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        ASSIGNED_ORIGIN,
+        EXAM_ORIGIN,
+    ],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
+)
+
 buckets = {}
 
 
 @app.middleware("http")
-async def middleware(request: Request, call_next):
-    origin = request.headers.get("Origin")
+async def request_context_and_rate_limit(request: Request, call_next):
 
-    # Request ID
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     request.state.request_id = request_id
 
-    # Handle preflight
-    if request.method == "OPTIONS":
-        response = Response(status_code=204)
-
-        if origin:
-            # Allow assigned origin OR browser origin (exam page)
-            if origin == ALLOWED_ORIGIN or origin.startswith("http"):
-                response.headers["Access-Control-Allow-Origin"] = origin
-
-            response.headers["Access-Control-Allow-Methods"] = "GET,OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "*"
-            response.headers["Access-Control-Expose-Headers"] = "X-Request-ID"
-
-        response.headers["X-Request-ID"] = request_id
-        return response
-
-    # Rate limiting
     client = request.headers.get("X-Client-Id", "anonymous")
+
     now = time.time()
 
     bucket = buckets.setdefault(client, [])
+
     bucket[:] = [t for t in bucket if now - t < WINDOW]
 
     if len(bucket) >= LIMIT:
         response = Response(status_code=429)
-
+        response.headers["Retry-After"] = "10"
         response.headers["X-Request-ID"] = request_id
-
-    if origin == ALLOWED_ORIGIN or origin == "https://exam.sanand.workers.dev":
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Expose-Headers"] = "X-Request-ID"
-
-    return response
+        return response
 
     bucket.append(now)
 
@@ -63,23 +57,19 @@ async def middleware(request: Request, call_next):
 
     response.headers["X-Request-ID"] = request_id
 
-    if origin:
-        if origin == ALLOWED_ORIGIN or origin.startswith("http"):
-            response.headers["Access-Control-Allow-Origin"] = origin
-
-        response.headers["Access-Control-Expose-Headers"] = "X-Request-ID"
-
     return response
 
 
 @app.get("/ping")
 async def ping(request: Request):
-    return JSONResponse(
+
+    response = JSONResponse(
         {
             "email": EMAIL,
             "request_id": request.state.request_id,
-        },
-        headers={
-            "X-Request-ID": request.state.request_id
         }
     )
+
+    response.headers["X-Request-ID"] = request.state.request_id
+
+    return response
