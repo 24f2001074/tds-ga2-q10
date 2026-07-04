@@ -48,8 +48,14 @@ async def middleware(request: Request, call_next):
 
     if len(bucket) >= LIMIT:
         response = Response(status_code=429)
+
         response.headers["X-Request-ID"] = request_id
-        return response
+
+    if origin == ALLOWED_ORIGIN or origin == "https://exam.sanand.workers.dev":
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Expose-Headers"] = "X-Request-ID"
+
+    return response
 
     bucket.append(now)
 
