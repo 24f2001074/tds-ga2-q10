@@ -30,25 +30,29 @@ app.add_middleware(
 
 buckets = {}
 
-
 @app.middleware("http")
 async def request_context_and_rate_limit(request: Request, call_next):
+
+    origin = request.headers.get("Origin")
 
     request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     request.state.request_id = request_id
 
     client = request.headers.get("X-Client-Id", "anonymous")
-
     now = time.time()
 
     bucket = buckets.setdefault(client, [])
-
     bucket[:] = [t for t in bucket if now - t < WINDOW]
 
     if len(bucket) >= LIMIT:
         response = Response(status_code=429)
         response.headers["Retry-After"] = "10"
         response.headers["X-Request-ID"] = request_id
+
+        if origin in [ASSIGNED_ORIGIN, EXAM_ORIGIN]:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Expose-Headers"] = "X-Request-ID"
+
         return response
 
     bucket.append(now)
