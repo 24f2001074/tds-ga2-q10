@@ -58,10 +58,7 @@ async def middleware(request: Request, call_next):
     bucket.append(now)
 
     # ---------- REQUEST CONTEXT ----------
-    request_id = request.headers.get("X-Request-ID")
-    if not request_id:
-        request_id = str(uuid.uuid4())
-
+    request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
     request.state.request_id = request_id
 
     response = await call_next(request)
@@ -74,9 +71,19 @@ async def middleware(request: Request, call_next):
     return response
 
 
+from fastapi.responses import JSONResponse
+
 @app.get("/ping")
 async def ping(request: Request):
-    return {
-        "email": EMAIL,
-        "request_id": request.state.request_id
-    }
+    request_id = request.state.request_id
+
+    response = JSONResponse(
+        {
+            "email": EMAIL,
+            "request_id": request_id
+        }
+    )
+
+    response.headers["X-Request-ID"] = request_id
+
+    return response
