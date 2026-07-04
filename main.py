@@ -5,39 +5,44 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 EMAIL = "24f2001074@ds.study.iitm.ac.in"
-ALLOWED_ORIGIN = "https://app-62eqyn.example.com"
+
+# Assigned origin + exam origin
+ALLOWED_ORIGINS = [
+    "https://app-62eqyn.example.com",
+    "https://exam.sanand.workers.dev",
+]
 
 app = FastAPI()
 
-# Allow both the assigned origin and all origins for the browser grader.
-# Only the assigned origin receives ACAO from our custom middleware.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-rate_limits = {}
 WINDOW = 10
 LIMIT = 13
+rate_limits = {}
 
 
 @app.middleware("http")
 async def middleware(request: Request, call_next):
-
     origin = request.headers.get("origin")
 
-    # Preflight
+    # ---------- PRE-FLIGHT ----------
     if request.method == "OPTIONS":
         response = Response(status_code=204)
-        if origin == ALLOWED_ORIGIN:
+
+        if origin in ALLOWED_ORIGINS:
             response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Headers"] = "*"
             response.headers["Access-Control-Allow-Methods"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+
         return response
 
-    # Rate limiting
+    # ---------- RATE LIMIT ----------
     client = request.headers.get("X-Client-Id", "anonymous")
     now = time.time()
 
@@ -45,19 +50,25 @@ async def middleware(request: Request, call_next):
     bucket[:] = [t for t in bucket if now - t < WINDOW]
 
     if len(bucket) >= LIMIT:
-        return Response(status_code=429)
+        return Response(
+            status_code=429,
+            content="Rate limit exceeded"
+        )
 
     bucket.append(now)
 
-    # Request ID
-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    # ---------- REQUEST CONTEXT ----------
+    request_id = request.headers.get("X-Request-ID")
+    if not request_id:
+        request_id = str(uuid.uuid4())
+
     request.state.request_id = request_id
 
     response = await call_next(request)
 
     response.headers["X-Request-ID"] = request_id
 
-    if origin == ALLOWED_ORIGIN:
+    if origin in ALLOWED_ORIGINS:
         response.headers["Access-Control-Allow-Origin"] = origin
 
     return response
